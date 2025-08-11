@@ -1,0 +1,3 @@
+spacy
+ginza
+ja_ginza_electra
