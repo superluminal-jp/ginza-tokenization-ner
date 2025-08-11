@@ -1,0 +1,3 @@
+[submodule "ginza_finetune_stockmark/ner-wikipedia-dataset"]
+	path = ginza_finetune_stockmark/ner-wikipedia-dataset
+	url = https://github.com/stockmarkteam/ner-wikipedia-dataset.git
