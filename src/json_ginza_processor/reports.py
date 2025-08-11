@@ -1,11 +1,12 @@
 """CSV report generation utilities for GiNZA processor outputs.
 
 This module provides helpers to export statistics from the JSON/dict output of
-the GiNZA processing pipeline into CSV files:
+the GiNZA processing pipeline into CSV files. All ranking reports are restricted
+to nouns (spaCy POS ``NOUN``) and proper nouns (``PROPN``):
 
-- Highest DF (document frequency) ranking
-- Highest IDF (inverse document frequency) ranking
-- Highest DF-IDF (df * idf) ranking
+- Highest DF (document frequency) ranking [nouns only]
+- Highest IDF (inverse document frequency) ranking [nouns only]
+- Highest DF-IDF (df * idf) ranking [nouns only]
 - List of all nouns (unique lemmas across inputs)
 
 Public entrypoint:
@@ -25,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _term_stats_maps(
-    result: Mapping[str, Any]
+    result: Mapping[str, Any],
 ) -> Tuple[Dict[str, int], Dict[str, float]]:
     """Build lookup maps for df and idf from the result vocabulary.
 
@@ -54,20 +55,28 @@ def _term_stats_maps(
     return term_to_df, term_to_idf
 
 
-def _collect_nouns(result: Mapping[str, Any]) -> Tuple[set[str], Dict[str, int]]:
-    """Collect unique noun lemmas from token payloads.
+def _collect_nouns_and_tags(
+    result: Mapping[str, Any],
+) -> Tuple[set[str], Dict[str, int], Dict[str, str]]:
+    """Collect unique noun lemmas and their tags from token payloads.
 
     Nouns are identified using spaCy coarse POS tags: {NOUN, PROPN}.
 
+    For each lemma, this function records:
+    - total token frequency across all inputs (noun tokens only)
+    - the most frequent fine-grained tag (e.g., "名詞-固有名詞-地名-一般")
+
     Returns
     -------
-    Tuple[set[str], Dict[str, int]]
-        A set of unique noun lemmas, and a frequency counter across all tokens.
+    Tuple[set[str], Dict[str, int], Dict[str, str]]
+        A set of unique noun lemmas, a frequency counter across all noun tokens,
+        and a mapping of lemma -> most frequent tag.
     """
 
     noun_pos = {"NOUN", "PROPN"}
     nouns: set[str] = set()
     freq: Counter[str] = Counter()
+    tag_counters: Dict[str, Counter[str]] = {}
 
     inputs = result.get("inputs", [])
     for inp in inputs:
@@ -79,8 +88,16 @@ def _collect_nouns(result: Mapping[str, Any]) -> Tuple[set[str], Dict[str, int]]
                     if isinstance(lemma, str) and lemma:
                         nouns.add(lemma)
                         freq[lemma] += 1
+                        tag_val = tok.get("tag")
+                        if isinstance(tag_val, str) and tag_val:
+                            tag_counters.setdefault(lemma, Counter())[tag_val] += 1
 
-    return nouns, dict(freq)
+    lemma_to_tag: Dict[str, str] = {}
+    for lemma, counter in tag_counters.items():
+        most_common = counter.most_common(1)
+        lemma_to_tag[lemma] = most_common[0][0] if most_common else ""
+
+    return nouns, dict(freq), lemma_to_tag
 
 
 def _collect_total_tf(result: Mapping[str, Any]) -> Dict[str, int]:
@@ -125,35 +142,52 @@ def export_csv_reports(result: Mapping[str, Any], output_dir: str) -> Dict[str, 
 
     term_to_df, term_to_idf = _term_stats_maps(result)
     totals_tf = _collect_total_tf(result)
-    nouns_set, nouns_freq = _collect_nouns(result)
+    nouns_set, nouns_freq, lemma_to_tag = _collect_nouns_and_tags(result)
 
-    # Highest DF ranking
+    # Restrict ranking reports to noun/proper-noun lemmas only.
+    noun_terms_df = [t for t in term_to_df.keys() if t in nouns_set]
+    noun_terms_idf = [t for t in term_to_idf.keys() if t in nouns_set]
+    noun_terms_dfidf = (term_to_df.keys() | term_to_idf.keys()) & nouns_set
+
+    # Highest DF ranking (nouns only)
+    df_terms_sorted = sorted(noun_terms_df, key=lambda t: (-term_to_df.get(t, 0), t))
     df_rows = (
-        (term, term_to_df.get(term, 0), term_to_idf.get(term, 0.0))
-        for term in sorted(
-            term_to_df.keys(), key=lambda t: (-term_to_df[t], t)
+        (
+            term,
+            lemma_to_tag.get(term, ""),
+            term_to_df.get(term, 0),
+            term_to_idf.get(term, 0.0),
         )
+        for term in df_terms_sorted
     )
 
-    # Highest IDF ranking
+    # Highest IDF ranking (nouns only)
+    idf_terms_sorted = sorted(
+        noun_terms_idf, key=lambda t: (-term_to_idf.get(t, 0.0), t)
+    )
     idf_rows = (
-        (term, term_to_idf.get(term, 0.0), term_to_df.get(term, 0))
-        for term in sorted(
-            term_to_idf.keys(), key=lambda t: (-term_to_idf[t], t)
+        (
+            term,
+            lemma_to_tag.get(term, ""),
+            term_to_idf.get(term, 0.0),
+            term_to_df.get(term, 0),
         )
+        for term in idf_terms_sorted
     )
 
-    # Highest DF-IDF ranking (df * idf)
-    df_idf_pairs = (
-        (term, term_to_df.get(term, 0), term_to_idf.get(term, 0.0))
-        for term in term_to_df.keys() | term_to_idf.keys()
-    )
+    # Highest DF-IDF ranking (df * idf) (nouns only)
     df_idf_sorted = sorted(
         (
-            (term, df, idf, float(df) * float(idf))
-            for term, df, idf in df_idf_pairs
+            (
+                term,
+                lemma_to_tag.get(term, ""),
+                term_to_df.get(term, 0),
+                term_to_idf.get(term, 0.0),
+                float(term_to_df.get(term, 0)) * float(term_to_idf.get(term, 0.0)),
+            )
+            for term in noun_terms_dfidf
         ),
-        key=lambda x: (-x[3], x[0]),
+        key=lambda x: (-x[4], x[0]),
     )
 
     # Nouns list (unique lemmas) with optional counts and df/idf when available
@@ -171,28 +205,37 @@ def export_csv_reports(result: Mapping[str, Any], output_dir: str) -> Dict[str, 
     paths: Dict[str, str] = {}
 
     df_path = os.path.join(output_dir, "highest_df.csv")
-    _write_csv(df_path, ("term", "df", "idf"), df_rows)
+    _write_csv(df_path, ("term", "tag", "df", "idf"), df_rows)
     paths["highest_df"] = df_path
-    LOGGER.info("event=export_csv file=%s rows=%d", df_path, len(term_to_df))
+    LOGGER.info("event=export_csv file=%s rows=%d", df_path, len(df_terms_sorted))
 
     idf_path = os.path.join(output_dir, "highest_idf.csv")
-    _write_csv(idf_path, ("term", "idf", "df"), idf_rows)
+    _write_csv(idf_path, ("term", "tag", "idf", "df"), idf_rows)
     paths["highest_idf"] = idf_path
-    LOGGER.info("event=export_csv file=%s rows=%d", idf_path, len(term_to_idf))
+    LOGGER.info("event=export_csv file=%s rows=%d", idf_path, len(idf_terms_sorted))
 
     df_idf_path = os.path.join(output_dir, "highest_df_idf.csv")
-    _write_csv(df_idf_path, ("term", "df", "idf", "df_idf"), df_idf_sorted)
+    _write_csv(df_idf_path, ("term", "tag", "df", "idf", "df_idf"), df_idf_sorted)
     paths["highest_df_idf"] = df_idf_path
     LOGGER.info("event=export_csv file=%s rows=%d", df_idf_path, len(df_idf_sorted))
 
     nouns_path = os.path.join(output_dir, "nouns.csv")
+    noun_rows = (
+        (
+            lemma,
+            lemma_to_tag.get(lemma, ""),
+            nouns_freq.get(lemma, 0),
+            totals_tf.get(lemma, 0),
+            term_to_df.get(lemma, 0),
+            term_to_idf.get(lemma, 0.0),
+        )
+        for lemma in sorted(nouns_set)
+    )
     _write_csv(
-        nouns_path, ("lemma", "token_freq", "total_tf", "df", "idf"), noun_rows
+        nouns_path, ("lemma", "tag", "token_freq", "total_tf", "df", "idf"), noun_rows
     )
     paths["nouns"] = nouns_path
     LOGGER.info("event=export_csv file=%s rows=%d", nouns_path, len(nouns_set))
 
     LOGGER.info("event=export_csv_reports status=finished")
     return paths
-
-

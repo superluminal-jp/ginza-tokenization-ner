@@ -26,5 +26,3 @@ __all__ = [
     "GiNZAProcessor",
     "export_csv_reports",
 ]
-
-

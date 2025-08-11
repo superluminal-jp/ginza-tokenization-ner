@@ -18,7 +18,7 @@ modern Japanese text.
 - **Sentence and token alignment**: indices and character offsets.
 - **Lemma-based statistics**: TF, IDF, TF-IDF with term occurrences.
 - **Structured logging** and error handling.
-- **CSV reports**: export DF, IDF, DF\*IDF rankings and all nouns.
+- **CSV reports**: export noun-only DF, IDF, DF\*IDF rankings and all nouns.
 
 ## How it works (behind the scenes)
 
@@ -112,10 +112,10 @@ python src/samples/usage_example.py
   - Uses the package API to process two example texts.
   - Prints a preview of the first token and top terms to stdout.
   - Writes the full JSON output to `result.json` in the project root.
-- Writes CSV reports under `reports/` directory:
-  - `highest_df.csv` (term, df, idf)
-  - `highest_idf.csv` (term, idf, df)
-  - `highest_df_idf.csv` (term, df, idf, df_idf)
+- Writes CSV reports under `reports/` directory (rankings are nouns/proper nouns only):
+  - `highest_df.csv` (noun term, df, idf)
+  - `highest_idf.csv` (noun term, idf, df)
+  - `highest_df_idf.csv` (noun term, df, idf, df_idf)
   - `nouns.csv` (lemma, token_freq, total_tf, df, idf)
 
 ### Minimal input variants

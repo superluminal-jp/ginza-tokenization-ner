@@ -69,13 +69,15 @@ def process_payload_to_json(payload: Mapping[str, Any]) -> str:
     return json.dumps(result_dict, ensure_ascii=False, separators=(",", ":"), indent=2)
 
 
-def export_reports_from_payload(payload: Mapping[str, Any], output_dir: str) -> Dict[str, str]:
+def export_reports_from_payload(
+    payload: Mapping[str, Any], output_dir: str
+) -> Dict[str, str]:
     """Process payload and write CSV reports to ``output_dir``.
 
-    Generates four CSV files:
-    - highest_df.csv: terms ranked by document frequency (df desc).
-    - highest_idf.csv: terms ranked by inverse document frequency (idf desc).
-    - highest_df_idf.csv: terms ranked by df * idf desc.
+    Generates four CSV files (ranking reports are restricted to nouns/proper nouns):
+    - highest_df.csv: noun terms ranked by document frequency (df desc).
+    - highest_idf.csv: noun terms ranked by inverse document frequency (idf desc).
+    - highest_df_idf.csv: noun terms ranked by df * idf desc.
     - nouns.csv: unique noun lemmas with counts and df/idf when available.
 
     Parameters
@@ -98,4 +100,3 @@ def export_reports_from_payload(payload: Mapping[str, Any], output_dir: str) -> 
     paths = export_csv_reports(result, output_dir)
     LOGGER.info("event=export_reports_from_payload status=finished")
     return paths
-
